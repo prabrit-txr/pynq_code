@@ -1,0 +1,75 @@
+from pynq.overlays.base import BaseOverlay
+from pynq.lib.video import *
+
+import cv2
+import numpy as np
+
+base = BaseOverlay("base.bit")
+
+# monitor configuration: 640*480 @ 60Hz
+Mode = VideoMode(640,480,24)
+hdmi_out = base.video.hdmi_out
+hdmi_out.configure(Mode,PIXEL_BGR)
+hdmi_out.start()
+
+# monitor (output) frame buffer size
+frame_out_w = 1920
+frame_out_h = 1080
+# camera (input) configuration
+frame_in_w = 640
+frame_in_h = 480
+
+# Initialize video capture from the webcam
+videoIn = cv2.VideoCapture(0)
+videoIn.set(cv2.CAP_PROP_FRAME_WIDTH, frame_in_w);
+videoIn.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_in_h);
+
+print("Capture device is open: " + str(videoIn.isOpened()))
+
+# Initialize HDMI output
+# Assuming you have some code to set up hdmi_out
+
+# Load Haar Cascade classifiers for face and eye detection
+face_cascade = cv2.CascadeClassifier('data/haarcascade_frontalface_default.xml')
+eye_cascade = cv2.CascadeClassifier('data/haarcascade_eye.xml')
+
+try:
+    while True:
+        ret, frame_vga = videoIn.read()
+
+        # Display webcam image via HDMI Out
+        if not ret:
+            raise RuntimeError("Failed to read from camera.")
+
+        # Create a copy of the frame for drawing detections
+        np_frame = frame_vga.copy()
+
+        # Convert the frame to grayscale for detection
+        gray = cv2.cvtColor(np_frame, cv2.COLOR_BGR2GRAY)
+
+        # Detect faces in the grayscale frame
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=2, minNeighbors=5)
+
+        # Iterate over detected faces
+        for (x, y, w, h) in faces:
+            cv2.rectangle(np_frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            roi_gray = gray[y:y + h, x:x + w]
+            roi_color = np_frame[y:y + h, x:x + w]
+
+            # Detect eyes within the region of interest (ROI)
+            eyes = eye_cascade.detectMultiScale(roi_gray)
+
+            # Iterate over detected eyes and draw rectangles
+            for (ex, ey, ew, eh) in eyes:
+                cv2.rectangle(roi_color, (ex, ey), (ex + ew, ey + eh), (0, 255, 0), 2)
+
+        # Update the HDMI output frame outside the face/eye detection loop
+        outframe = hdmi_out.newframe()
+        outframe[0:480, 0:640, :] = np_frame[0:480, 0:640, :]
+        hdmi_out.writeframe(outframe)
+
+# Release video capture and HDMI output resources when done
+except:
+    videoIn.release()
+    hdmi_out.close()
+    del hdmi_out
